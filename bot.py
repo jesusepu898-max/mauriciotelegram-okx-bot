@@ -599,23 +599,21 @@ def main():
     # Reprogramar timers al reiniciar
     reschedule_all_user_timers(app)
 
-    # Reporte semanal: domingos 21:00 AR
-    app.job_queue.run_daily(
-        weekly_report_job,
-        time=datetime.strptime("21:00", "%H:%M").time(),
-        days=(6,),  # domingo
-        timezone=TZ_AR,
-        name="weekly_report"
-    )
+   # Reporte semanal: domingos 21:00 AR (00:00 UTC)
+app.job_queue.run_daily(
+    weekly_report_job,
+    time=datetime.strptime("00:00", "%H:%M").time(),
+    days=(6,),  # domingo
+    name="weekly_report"
+)
 
-    # Reporte mensual admin: corre diario 21:05 AR, y si es día 30 manda 1 vez por mes
-    app.job_queue.run_daily(
-        monthly_admin_report_job,
-        time=datetime.strptime("21:05", "%H:%M").time(),
-        days=(0, 1, 2, 3, 4, 5, 6),
-        timezone=TZ_AR,
-        name="monthly_admin_report"
-    )
+    # Reporte mensual admin: corre diario 00:05 UTC (21:05 AR del día anterior)
+app.job_queue.run_daily(
+    monthly_admin_report_job,
+    time=datetime.strptime("00:05", "%H:%M").time(),
+    days=(0, 1, 2, 3, 4, 5, 6),
+    name="monthly_admin_report"
+)
 
     print("🤖 OKX VIP BOT PRO MAX v2 iniciado.")
     app.run_polling()
