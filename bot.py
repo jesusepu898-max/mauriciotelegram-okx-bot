@@ -135,7 +135,7 @@ async def on_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.chat_join_request.from_user
     await context.bot.send_message(
         chat_id=user.id,
-        text="📌 Bienvenido al Grupo VIP de Señales Sr. Yotuber/OKX. Envíame tu UID de OKX (solo números) para validar acceso."
+        text="📌 Bienvenido al Grupo VIP de Señales Sr. Youtuber OKX. Envíame tu UID de OKX (solo números) para validar acceso."
     )
 
 async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -144,6 +144,19 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == BYPASS_CODE:
         await context.bot.approve_chat_join_request(VIP_CHAT_ID, user.id)
+
+        # 🔥 BIENVENIDA EN EL GRUPO
+        await context.bot.send_message(
+            chat_id=VIP_CHAT_ID,
+            text=(
+                f"👋 Bienvenido {mention_html(user.id, user.first_name)} "
+                "al grupo Sr. Youtuber OKX VIP.\n\n"
+                "Aquí encontrarás señales exclusivas, tips y material educativo, "
+                "además de soporte personalizado en OKX.\n\n"
+                "¡Saludos!"
+            ),
+            parse_mode=ParseMode.HTML
+        )
         return
 
     if not text.isnumeric():
@@ -165,6 +178,19 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=f"✔️ UID verificado.\n📊 Volumen del mes: {vol} USDT"
     )
 
+    # 🔥 BIENVENIDA EN EL GRUPO
+    await context.bot.send_message(
+        chat_id=VIP_CHAT_ID,
+        text=(
+            f"👋 Bienvenido {mention_html(user.id, user.first_name)} "
+            "al grupo Sr. Youtuber OKX VIP.\n\n"
+            "Aquí encontrarás señales exclusivas, tips y material educativo, "
+            "además de soporte personalizado en OKX.\n\n"
+            "¡Saludos!"
+        ),
+        parse_mode=ParseMode.HTML
+    )
+
 # ─────────────────────────────
 # MAIN
 # ─────────────────────────────
@@ -178,7 +204,6 @@ def main():
     app.add_handler(ChatJoinRequestHandler(on_join_request))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT, handle_private))
 
-    # Reporte semanal (domingo 00:00 UTC = 21:00 AR)
     app.job_queue.run_daily(
         lambda ctx: print("Weekly job running"),
         time=datetime.strptime("00:00", "%H:%M").time(),
@@ -186,7 +211,6 @@ def main():
         name="weekly_report"
     )
 
-    # Reporte mensual (00:05 UTC)
     app.job_queue.run_daily(
         lambda ctx: print("Monthly job check"),
         time=datetime.strptime("00:05", "%H:%M").time(),
