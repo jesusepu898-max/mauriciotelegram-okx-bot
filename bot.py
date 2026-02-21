@@ -135,7 +135,7 @@ async def on_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.chat_join_request.from_user
     await context.bot.send_message(
         chat_id=user.id,
-        text="📌 Envíame tu UID de OKX (solo números) para validar acceso."
+        text="📌 Bienvenido al Grupo VIP de Señales Sr. Yotuber/OKX. Envíame tu UID de OKX (solo números) para validar acceso."
     )
 
 async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
