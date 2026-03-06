@@ -37,14 +37,17 @@ OKX_API_PASSPHRASE = os.environ["OKX_API_PASSPHRASE"]
 BYPASS_CODE = os.environ.get("BYPASS_CODE", "00000000010101010")
 ADMIN_IDS = [int(x.strip()) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
 
-DB_PATH = os.environ.get("DB_PATH", "bot.db")
+# Render disk persistente
+DB_PATH = os.environ.get("DB_PATH", "/var/data/bot.db")
 
 TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
+
 
 # ─────────────────────────────
 # DATABASE
 # ─────────────────────────────
 def db():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
@@ -65,6 +68,28 @@ def init_db():
     conn.commit()
     conn.close()
 
+    print("DB inicializada en:", DB_PATH)
+
+
+def save_user(telegram_id, uid):
+
+    try:
+        conn = db()
+        cur = conn.cursor()
+
+        cur.execute(
+            "INSERT OR REPLACE INTO users (telegram_id, uid, joined_at) VALUES (?, ?, ?)",
+            (telegram_id, uid, datetime.now(timezone.utc).isoformat())
+        )
+
+        conn.commit()
+        conn.close()
+
+        print(f"UID guardado correctamente -> TG:{telegram_id} UID:{uid}")
+
+    except Exception as e:
+        print("Error guardando UID:", e)
+
 
 # ─────────────────────────────
 # OKX
@@ -77,6 +102,7 @@ def get_okx_server_time_iso():
 
 
 def sign_okx(method, path, body=""):
+
     timestamp = get_okx_server_time_iso()
     message = timestamp + method + path + body
 
@@ -92,6 +118,7 @@ def sign_okx(method, path, body=""):
 
 
 def okx_affiliate_detail(uid):
+
     path = f"/api/v5/affiliate/invitee/detail?uid={uid}"
 
     ts, signature = sign_okx("GET", path)
@@ -113,18 +140,23 @@ def okx_affiliate_detail(uid):
 # TELEGRAM HANDLERS
 # ─────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     await update.message.reply_text(
         "👋 Solicita el acceso al grupo VIP y envíame tu UID de OKX por privado."
     )
 
 
 async def on_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     user = update.chat_join_request.from_user
 
-    await context.bot.send_message(
-        chat_id=user.id,
-        text="📌 Bienvenido al Grupo VIP de Señales Sr. Youtuber OKX. Envíame tu UID de OKX (solo números) para validar acceso."
-    )
+    try:
+        await context.bot.send_message(
+            chat_id=user.id,
+            text="📌 Bienvenido al Grupo VIP de Señales Sr. Youtuber OKX. Envíame tu UID de OKX (solo números) para validar acceso."
+        )
+    except:
+        pass
 
 
 async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -160,18 +192,13 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("UID no válido.")
         return
 
-    vol = resp["data"][0].get("volMonth") or "0"
+    # volumen seguro
+    vol = 0
+    if resp.get("data"):
+        vol = resp["data"][0].get("volMonth") or 0
 
-    conn = db()
-    cur = conn.cursor()
-
-    cur.execute(
-        "INSERT OR REPLACE INTO users (telegram_id, uid, joined_at) VALUES (?, ?, ?)",
-        (user.id, text, datetime.now(timezone.utc).isoformat())
-    )
-
-    conn.commit()
-    conn.close()
+    # guardar UID
+    save_user(user.id, text)
 
     await context.bot.approve_chat_join_request(VIP_CHAT_ID, user.id)
 
@@ -194,7 +221,7 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────────────
-# ADMIN: LISTA DE UID
+# ADMIN: LISTA UID
 # ─────────────────────────────
 async def lista(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -217,7 +244,7 @@ async def lista(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────────────
-# ADMIN: SORTEO (2 GANADORES)
+# ADMIN: SORTEO
 # ─────────────────────────────
 async def sorteo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -265,10 +292,15 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ranking = []
 
     for r in rows:
+
         resp = okx_affiliate_detail(r["uid"])
 
         if resp.get("code") == "0":
-            vol = float(resp["data"][0].get("volMonth") or 0)
+
+            vol = 0
+            if resp.get("data"):
+                vol = float(resp["data"][0].get("volMonth") or 0)
+
             ranking.append((r["uid"], r["telegram_id"], vol))
 
     ranking.sort(key=lambda x: x[2], reverse=True)
@@ -301,6 +333,7 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT, handle_private))
 
     print("🤖 BOT OKX PRO MAX iniciado.")
+    print("DB PATH:", DB_PATH)
 
     app.run_polling()
 
