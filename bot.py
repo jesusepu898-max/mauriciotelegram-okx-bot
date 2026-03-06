@@ -6,8 +6,9 @@ import base64
 import hashlib
 import sqlite3
 import requests
+import random
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from telegram import Update
@@ -37,7 +38,6 @@ BYPASS_CODE = os.environ.get("BYPASS_CODE", "00000000010101010")
 ADMIN_IDS = [int(x.strip()) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
 
 DB_PATH = os.environ.get("DB_PATH", "bot.db")
-OKX_CACHE_TTL = int(os.environ.get("OKX_CACHE_TTL", "600"))
 
 TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
 
@@ -49,6 +49,7 @@ def db():
     conn.row_factory = sqlite3.Row
     return conn
 
+
 def init_db():
     conn = db()
     cur = conn.cursor()
@@ -57,36 +58,13 @@ def init_db():
     CREATE TABLE IF NOT EXISTS users (
         telegram_id INTEGER PRIMARY KEY,
         uid TEXT,
-        joined_at TEXT NOT NULL,
-        is_vip INTEGER NOT NULL DEFAULT 1
-    )
-    """)
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS tracked_invitees (
-        uid TEXT PRIMARY KEY,
-        source TEXT,
-        added_at TEXT NOT NULL
-    )
-    """)
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS okx_cache (
-        uid TEXT PRIMARY KEY,
-        payload TEXT NOT NULL,
-        fetched_at INTEGER NOT NULL
-    )
-    """)
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS meta (
-        k TEXT PRIMARY KEY,
-        v TEXT
+        joined_at TEXT NOT NULL
     )
     """)
 
     conn.commit()
     conn.close()
+
 
 # ─────────────────────────────
 # OKX
@@ -97,19 +75,25 @@ def get_okx_server_time_iso():
     dt = datetime.fromtimestamp(int(ts_ms) / 1000, tz=timezone.utc)
     return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
+
 def sign_okx(method, path, body=""):
     timestamp = get_okx_server_time_iso()
     message = timestamp + method + path + body
+
     mac = hmac.new(
         OKX_API_SECRET.encode(),
         msg=message.encode(),
         digestmod=hashlib.sha256
     )
+
     signature = base64.b64encode(mac.digest()).decode()
+
     return timestamp, signature
+
 
 def okx_affiliate_detail(uid):
     path = f"/api/v5/affiliate/invitee/detail?uid={uid}"
+
     ts, signature = sign_okx("GET", path)
 
     headers = {
@@ -121,7 +105,9 @@ def okx_affiliate_detail(uid):
     }
 
     url = "https://www.okx.com" + path
+
     return requests.get(url, headers=headers, timeout=15).json()
+
 
 # ─────────────────────────────
 # TELEGRAM HANDLERS
@@ -131,21 +117,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👋 Solicita el acceso al grupo VIP y envíame tu UID de OKX por privado."
     )
 
+
 async def on_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.chat_join_request.from_user
+
     await context.bot.send_message(
         chat_id=user.id,
         text="📌 Bienvenido al Grupo VIP de Señales Sr. Youtuber OKX. Envíame tu UID de OKX (solo números) para validar acceso."
     )
 
+
 async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     user = update.message.from_user
     text = update.message.text.strip()
 
     if text == BYPASS_CODE:
+
         await context.bot.approve_chat_join_request(VIP_CHAT_ID, user.id)
 
-        # 🔥 BIENVENIDA EN EL GRUPO
         await context.bot.send_message(
             chat_id=VIP_CHAT_ID,
             text=(
@@ -157,6 +147,7 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ),
             parse_mode=ParseMode.HTML
         )
+
         return
 
     if not text.isnumeric():
@@ -171,6 +162,17 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     vol = resp["data"][0].get("volMonth") or "0"
 
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute(
+        "INSERT OR REPLACE INTO users (telegram_id, uid, joined_at) VALUES (?, ?, ?)",
+        (user.id, text, datetime.now(timezone.utc).isoformat())
+    )
+
+    conn.commit()
+    conn.close()
+
     await context.bot.approve_chat_join_request(VIP_CHAT_ID, user.id)
 
     await context.bot.send_message(
@@ -178,7 +180,6 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=f"✔️ UID verificado.\n📊 Volumen del mes: {vol} USDT"
     )
 
-    # 🔥 BIENVENIDA EN EL GRUPO
     await context.bot.send_message(
         chat_id=VIP_CHAT_ID,
         text=(
@@ -191,35 +192,118 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode=ParseMode.HTML
     )
 
+
+# ─────────────────────────────
+# ADMIN: LISTA DE UID
+# ─────────────────────────────
+async def lista(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.message.from_user.id not in ADMIN_IDS:
+        return
+
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT uid FROM users")
+    rows = cur.fetchall()
+
+    conn.close()
+
+    lista_uid = "\n".join([r["uid"] for r in rows])
+
+    await update.message.reply_text(
+        f"📋 LISTA UID REGISTRADOS\n\n{lista_uid}"
+    )
+
+
+# ─────────────────────────────
+# ADMIN: SORTEO (2 GANADORES)
+# ─────────────────────────────
+async def sorteo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.message.from_user.id not in ADMIN_IDS:
+        return
+
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT telegram_id, uid FROM users")
+    rows = cur.fetchall()
+
+    conn.close()
+
+    if len(rows) < 2:
+        await update.message.reply_text("⚠️ No hay suficientes usuarios.")
+        return
+
+    ganadores = random.sample(rows, 2)
+
+    mensaje = "🎉 SORTEO VIP 🎉\n\n🏆 GANADORES:\n\n"
+
+    for i, g in enumerate(ganadores, start=1):
+        mensaje += f"{i}️⃣ UID: {g['uid']} | TG: {g['telegram_id']}\n"
+
+    await update.message.reply_text(mensaje)
+
+
+# ─────────────────────────────
+# ADMIN: TOP VOLUMEN
+# ─────────────────────────────
+async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.message.from_user.id not in ADMIN_IDS:
+        return
+
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT telegram_id, uid FROM users")
+    rows = cur.fetchall()
+
+    conn.close()
+
+    ranking = []
+
+    for r in rows:
+        resp = okx_affiliate_detail(r["uid"])
+
+        if resp.get("code") == "0":
+            vol = float(resp["data"][0].get("volMonth") or 0)
+            ranking.append((r["uid"], r["telegram_id"], vol))
+
+    ranking.sort(key=lambda x: x[2], reverse=True)
+
+    mensaje = "🏆 TOP VOLUMEN OKX\n\n"
+
+    for i, r in enumerate(ranking[:10], start=1):
+        mensaje += f"{i}. UID {r[0]} | TG {r[1]} | {r[2]:.0f} USDT\n"
+
+    await update.message.reply_text(mensaje)
+
+
 # ─────────────────────────────
 # MAIN
 # ─────────────────────────────
 def main():
+
     init_db()
 
     defaults = Defaults(tzinfo=timezone.utc)
+
     app = Application.builder().token(BOT_TOKEN).defaults(defaults).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("lista", lista))
+    app.add_handler(CommandHandler("sorteo", sorteo))
+    app.add_handler(CommandHandler("top", top))
+
     app.add_handler(ChatJoinRequestHandler(on_join_request))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT, handle_private))
 
-    app.job_queue.run_daily(
-        lambda ctx: print("Weekly job running"),
-        time=datetime.strptime("00:00", "%H:%M").time(),
-        days=(6,),
-        name="weekly_report"
-    )
-
-    app.job_queue.run_daily(
-        lambda ctx: print("Monthly job check"),
-        time=datetime.strptime("00:05", "%H:%M").time(),
-        days=(0,1,2,3,4,5,6),
-        name="monthly_admin_report"
-    )
-
     print("🤖 BOT OKX PRO MAX iniciado.")
+
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
